@@ -85,20 +85,17 @@
 
         let scheduleData = JSON.parse(localStorage.getItem('scheduleData')) || null;
         let studentsData = JSON.parse(localStorage.getItem('studentsData')) || [];
-        let currentActiveStudent = null;
+        let currentActiveStudent = JSON.parse(localStorage.getItem('currentActiveStudent')) || null;
 
         document.addEventListener('DOMContentLoaded', () => {
             if (scheduleData) initSelectors();
-            checkCurrentStatus();
+            updateAlertUI();
 
             document.getElementById('jsonFileInput').addEventListener('change', handleJSONUpload);
             document.getElementById('csvFileInput').addEventListener('change', handleCSVUpload);
             document.getElementById('groupSelect').addEventListener('change', renderStudents);
             document.getElementById('teacherSelect').addEventListener('change', updateContext);
             document.getElementById('returnBtn').addEventListener('click', registerReturn);
-
-            // Actualizar estado cada 10 segundos consultando Google Sheets
-            setInterval(checkCurrentStatus, 10000);
         });
 
         function handleJSONUpload(event) {
@@ -106,10 +103,14 @@
             if (!file) return;
             const reader = new FileReader();
             reader.onload = (e) => {
-                scheduleData = JSON.parse(e.target.result);
-                localStorage.setItem('scheduleData', JSON.stringify(scheduleData));
-                alert("¡Horarios cargados!");
-                initSelectors();
+                try {
+                    scheduleData = JSON.parse(e.target.result);
+                    localStorage.setItem('scheduleData', JSON.stringify(scheduleData));
+                    alert("¡Horarios cargados con éxito!");
+                    initSelectors();
+                } catch (err) {
+                    alert("Error al leer el archivo JSON.");
+                }
             };
             reader.readAsText(file);
         }
@@ -133,7 +134,7 @@
                     }
                 }
                 localStorage.setItem('studentsData', JSON.stringify(studentsData));
-                alert(`¡Se cargaron ${studentsData.length} alumnos!`);
+                alert(`¡Se cargaron ${studentsData.length} alumnos correctamente!`);
                 renderStudents();
             };
             reader.readAsText(file);
@@ -183,9 +184,14 @@
                 return;
             }
 
+            if (studentsData.length === 0) {
+                grid.innerHTML = '<p class="text-red-500 col-span-full text-center py-8">No hay alumnos cargados. Por favor cargue el archivo CSV.</p>';
+                return;
+            }
+
             const filtered = studentsData.filter(s => s.group === groupName);
             if (filtered.length === 0) {
-                grid.innerHTML = '<p class="text-red-500 col-span-full text-center py-8">No hay alumnos en este grupo o falta cargar el CSV.</p>';
+                grid.innerHTML = `<p class="text-orange-500 col-span-full text-center py-8">No se encontraron alumnos para el grupo ${groupName}.</p>`;
                 return;
             }
 
@@ -204,12 +210,12 @@
         function triggerExit(studentName, groupName) {
             const teacherId = document.getElementById('teacherSelect').value;
             if (!teacherId) {
-                alert("Seleccione un docente primero.");
+                alert("Por favor seleccione un docente primero.");
                 return;
             }
 
             if (currentActiveStudent) {
-                alert("⚠️ Ya hay un alumno fuera de clase.");
+                alert(`⚠️ Ya hay un alumno fuera de clase (${currentActiveStudent.student}). Debe registrar su regreso antes de que salga otro.`);
                 return;
             }
 
@@ -228,24 +234,32 @@
                 horaSalida: now.toLocaleTimeString()
             };
 
+            // Enviar a Google Sheets usando no-cors para evitar bloqueos del navegador
             fetch(WEB_APP_URL, {
                 method: "POST",
+                mode: "no-cors",
+                headers: { "Content-Type": "text/plain" },
                 body: JSON.stringify(payload)
-            })
-            .then(res => res.json())
-            .then(data => {
-                if (data.status === "blocked") {
-                    alert(data.message);
-                }
-                checkCurrentStatus();
-            })
-            .catch(err => {
+            }).then(() => {
+                // Guardar estado localmente para bloquear inmediatamente la interfaz
+                currentActiveStudent = {
+                    student: studentName,
+                    group: groupName,
+                    motivo: motivo,
+                    horaSalida: now.toLocaleTimeString()
+                };
+                localStorage.setItem('currentActiveStudent', JSON.stringify(currentActiveStudent));
+                updateAlertUI();
+                alert(`Salida registrada para ${studentName}.`);
+            }).catch(err => {
                 console.error(err);
-                checkCurrentStatus();
+                alert("Error al registrar la salida.");
             });
         }
 
         function registerReturn() {
+            if (!currentActiveStudent) return;
+
             const now = new Date();
             const payload = {
                 action: "regreso",
@@ -254,35 +268,32 @@
 
             fetch(WEB_APP_URL, {
                 method: "POST",
+                mode: "no-cors",
+                headers: { "Content-Type": "text/plain" },
                 body: JSON.stringify(payload)
-            })
-            .then(res => res.json())
-            .then(data => {
-                checkCurrentStatus();
+            }).then(() => {
+                currentActiveStudent = null;
+                localStorage.removeItem('currentActiveStudent');
+                updateAlertUI();
+                alert("Regreso registrado con éxito.");
+            }).catch(err => {
+                console.error(err);
+                alert("Error al registrar el regreso.");
             });
         }
 
-        function checkCurrentStatus() {
-            fetch(WEB_APP_URL + "?action=obtenerEstado", { method: "GET" }) // o POST dependiendo del despliegue
-            // Nota: Como Apps Script maneja doPost, hacemos un POST simulado para consultar
-            fetch(WEB_APP_URL, {
-                method: "POST",
-                body: JSON.stringify({ action: "obtenerEstado" })
-            })
-            .then(res => res.json())
-            .then(data => {
-                const alertBox = document.getElementById('statusAlert');
-                if (data.status === "success" && data.currentOut) {
-                    currentActiveStudent = data.currentOut;
-                    document.getElementById('currentStudentOut').textContent = `${data.currentOut.student} (${data.currentOut.group})`;
-                    document.getElementById('currentMotivoOut').textContent = data.currentOut.motivo;
-                    alertBox.classList.remove('hidden');
-                } else {
-                    currentActiveStudent = null;
-                    alertBox.classList.add('hidden');
-                }
-            })
-            .catch(err => console.error("Error al consultar estado:", err));
+        function updateAlertUI() {
+            const alertBox = document.getElementById('statusAlert');
+            const studentSpan = document.getElementById('currentStudentOut');
+            const motivoSpan = document.getElementById('currentMotivoOut');
+
+            if (currentActiveStudent) {
+                studentSpan.textContent = `${currentActiveStudent.student} (${currentActiveStudent.group})`;
+                motivoSpan.textContent = currentActiveStudent.motivo;
+                alertBox.classList.remove('hidden');
+            } else {
+                alertBox.classList.add('hidden');
+            }
         }
     </script>
 </body>
