@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Control de Salidas - Secundaria Pablo Guardado Chávez</title>
+    <!-- Tailwind CSS para un diseño limpio y profesional -->
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+    <style>
+        .student-card {
+            transition: all 0.2s ease;
+        }
+        .student-card:hover {
+            transform: translateY(-2px);
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen text-gray-800">
+
+    <div class="container mx-auto px-4 py-6 max-w-5xl">
+        <!-- Encabezado -->
+        <header class="bg-white shadow-md rounded-lg p-6 mb-6 flex flex-col md:flex-row justify-between items-center">
+            <div>
+                <h1 class="text-2xl font-bold text-blue-900">Control de Baño y Enfermería</h1>
+                <p class="text-sm text-gray-600">Colegio Pablo Guardado Chávez</p>
+            </div>
+            <div class="mt-4 md:mt-0 flex gap-2">
+                <label class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded cursor-pointer text-sm font-medium shadow">
+                    📁 Cargar JSON Horarios
+                    <input type="file" id="jsonFile" accept=".json" class="hidden" onchange="loadJSON(event)">
+                </label>
+                <label class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded cursor-pointer text-sm font-medium shadow">
+                    📊 Cargar CSV Alumnos
+                    <input type="file" id="csvFile" accept=".csv" class="hidden" onchange="loadCSV(event)">
+                </label>
+            </div>
+        </header>
+
+        <!-- Panel de Configuración y Selección -->
+        <div class="bg-white shadow-md rounded-lg p-6 mb-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+                <label class="block text-sm font-semibold text-gray-700 mb-1">Docente:</label>
+                <select id="teacherSelect" class="w-full border border-gray-300 rounded p-2 focus:ring focus:ring-blue-300" onchange="updateScheduleContext()">
+                    <option value="">Seleccione docente...</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm font-semibold text-gray-700 mb-1">Grupo / Salón:</label>
+                <select id="groupSelect" class="w-full border border-gray-300 rounded p-2 focus:ring focus:ring-blue-300" onchange="renderStudents()">
+                    <option value="">Seleccione grupo...</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm font-semibold text-gray-700 mb-1">Motivo de Salida:</label>
+                <select id="motivoSelect" class="w-full border border-gray-300 rounded p-2 focus:ring focus:ring-blue-300">
+                    <option value="Baño">Baño</option>
+                    <option value="Enfermería">Enfermería</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- Estado en Vivo y Alerta de Alumno Fuera -->
+        <div id="statusAlert" class="hidden bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-6 rounded shadow-sm flex justify-between items-center">
+            <div>
+                <span class="font-bold text-yellow-800">⚠️ Alumno actualmente fuera:</span>
+                <span id="currentStudentOut" class="text-yellow-900 font-semibold ml-2"></span>
+                <span id="currentMotivoOut" class="text-xs bg-yellow-200 text-yellow-800 px-2 py-0.5 rounded ml-2"></span>
+            </div>
+            <button onclick="registerReturn()" class="bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-1.5 rounded text-sm font-medium shadow">
+                Registrar Regreso
+            </button>
+        </div>
+
+        <!-- Cuadrícula / Mesa de Alumnos -->
+        <div class="bg-white shadow-md rounded-lg p-6">
+            <h2 class="text-lg font-bold text-gray-800 mb-4 flex justify-between items-center">
+                <span>Listado de Alumnos del Grupo</span>
+                <span id="activeSubjectDisplay" class="text-sm font-normal bg-blue-100 text-blue-800 px-3 py-1 rounded-full">Materia: -</span>
+            </h2>
+            <div id="studentsGrid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                <p class="text-gray-500 col-span-full text-center py-8">Cargue el JSON de horarios, el CSV de alumnos y seleccione un docente/grupo para comenzar.</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // CONFIGURACIÓN DE FIREBASE (Reemplaza con tus credenciales de tu proyecto Firebase)
+        const firebaseConfig = {
+            apiKey: "TU_API_KEY",
+            authDomain: "TU_AUTH_DOMAIN",
+            databaseURL: "TU_DATABASE_URL",
+            projectId: "TU_PROJECT_ID",
+            storageBucket: "TU_STORAGE_BUCKET",
+            messagingSenderId: "TU_MESSAGING_SENDER_ID",
+            appId: "TU_APP_ID"
+        };
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
+
+        // URL DE TU WEB APP DE GOOGLE APPS SCRIPT
+        const WEB_APP_URL = "TU_URL_DE_GOOGLE_APPS_SCRIPT_AQUI";
+
+        let scheduleData = JSON.parse(localStorage.getItem('scheduleData')) || null;
+        let studentsData = JSON.parse(localStorage.getItem('studentsData')) || [];
+        let currentActiveStudent = null; // Sincronizado con Firebase
+
+        window.onload = function() {
+            if (scheduleData) initApp();
+            setupFirebaseListener();
+        };
+
+        // Cargar JSON de Horarios
+        function loadJSON(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    scheduleData = JSON.parse(e.target.result);
+                    localStorage.setItem('scheduleData', JSON.stringify(scheduleData));
+                    alert("¡Horarios cargados exitosamente!");
+                    initApp();
+                } catch (err) {
+                    alert("Error al parsear el archivo JSON.");
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        // Cargar CSV de Alumnos
+        function loadCSV(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const text = e.target.result;
+                const lines = text.split('\n');
+                studentsData = [];
+                // Asumiendo formato: Nombre_Alumno, Grupo
+                for (let i = 1; i < lines.length; i++) {
+                    const line = lines[i].trim();
+                    if (!line) continue;
+                    const parts = line.split(',');
+                    if (parts.length >= 2) {
+                        studentsData.push({
+                            name: parts[0].trim().replace(/^["']|["']$/g, ''),
+                            group: parts[1].trim().replace(/^["']|["']$/g, '')
+                        });
+                    }
+                }
+                localStorage.setItem('studentsData', JSON.stringify(studentsData));
+                alert(`¡Se cargaron ${studentsData.length} alumnos correctamente!`);
+                renderStudents();
+            };
+            reader.readAsText(file);
+        }
+
+        // Inicializar selectores con el Maestro Comodín incluido
+        function initApp() {
+            if (!scheduleData) return;
+            const teacherSelect = document.getElementById('teacherSelect');
+            teacherSelect.innerHTML = '<option value="">Seleccione docente...</option>';
+            
+            // Agregar Maestro Comodín para actualizaciones fuera de horario
+            let comodinOption = document.createElement('option');
+            comodinOption.value = "COMODIN";
+            comodinOption.textContent = "⭐ MAESTRO COMODÍN (Actualización / Libre)";
+            teacherSelect.appendChild(comodinOption);
+
+            // Ordenar docentes alfabéticamente
+            let teachers = [...scheduleData.teachers].sort((a, b) => a.name.localeCompare(b.name));
+            teachers.forEach(t => {
+                let opt = document.createElement('option');
+                opt.value = t.id;
+                opt.textContent = t.name;
+                teacherSelect.appendChild(opt);
+            });
+
+            // Cargar grupos
+            const groupSelect = document.getElementById('groupSelect');
+            groupSelect.innerHTML = '<option value="">Seleccione grupo...</option>';
+            scheduleData.classes.forEach(c => {
+                let opt = document.createElement('option');
+                opt.value = c.name; // Usamos el nombre ej: "1A1"
+                opt.textContent = c.name;
+                groupSelect.appendChild(opt);
+            });
+
+            autodetectCurrentClass();
+        }
+
+        // Autodetección de horario actual según día y hora del sistema
+        function autodetectionDayAndPeriod() {
+            const now = new Date();
+            const dayMap = { 1: "Lunes", 2: "Martes", 3: "Miercoles", 4: "Jueves", 5: "Viernes" };
+            const currentDayName = dayMap[now.getDay()];
+            const currentHour = now.getHours();
+            const currentMinute = now.getMinutes();
+            const currentTimeVal = currentHour * 60 + currentMinute;
+
+            let matchedPeriod = null;
+            if (scheduleData && scheduleData.periods) {
+                scheduleData.periods.forEach(p => {
+                    let startVal = p.startHour * 60 + (p.startMinute || 0);
+                    let endVal = p.endHour * 60 + (p.endMinute || 50);
+                    if (currentTimeVal >= startVal && currentTimeVal <= endVal) {
+                        matchedPeriod = p;
+                    }
+                });
+            }
+            return { dayName: currentDayName, period: matchedPeriod };
+        }
+
+        function autodetectCurrentClass() {
+            const auto = autodetectionDayAndPeriod();
+            if (!auto.dayName || !auto.period || !scheduleData) return;
+
+            // Buscar si hay una actividad para este periodo y día
+            const dayObj = scheduleData.days.find(d => d.name === auto.dayName);
+            if (!dayObj) return;
+
+            // Encontrar actividades que coincidan con dayId y periodId
+            for (let act of scheduleData.activities) {
+                let card = act.cards.find(c => c.dayId === dayObj.id && c.periodId === auto.period.id);
+                if (card) {
+                    // Encontró clase en curso
+                    document.getElementById('teacherSelect').value = act.teacherIds[0];
+                    // Obtener nombre del grupo asociado
+                    updateScheduleContext();
+                    break;
+                }
+            }
+        }
+
+        function updateScheduleContext() {
+            const teacherId = document.getElementById('teacherSelect').value;
+            if (teacherId === "COMODIN") {
+                document.getElementById('activeSubjectDisplay').textContent = "Materia: [Modo Comodín / Libre]";
+                return;
+            }
+            // Aquí puedes refinar la materia actual según el docente seleccionado
+        }
+
+        // Renderizar la cuadrícula de alumnos del grupo seleccionado
+        function renderStudents() {
+            const groupName = document.getElementById('groupSelect').value;
+            const grid = document.getElementById('studentsGrid');
+            grid.innerHTML = '';
+
+            if (!groupName) {
+                grid.innerHTML = '<p class="text-gray-500 col-span-full text-center py-8">Seleccione un grupo para ver los alumnos.</p>';
+                return;
+            }
+
+            // Filtrar alumnos del grupo
+            const filteredStudents = studentsData.filter(s => s.group === groupName);
+            
+            if (filteredStudents.length === 0) {
+                grid.innerHTML = `<p class="text-red-500 col-span-full text-center py-8">No se encontraron alumnos para el grupo ${groupName} en el CSV cargado.</p>`;
+                return;
+            }
+
+            filteredStudents.forEach(student => {
+                const card = document.createElement('div');
+                card.className = "student-card bg-gray-50 border border-gray-200 rounded-lg p-4 text-center cursor-pointer hover:bg-blue-50 hover:border-blue-300 shadow-sm flex flex-col justify-between";
+                card.innerHTML = `
+                    <span class="font-medium text-gray-800 text-sm mb-2">${student.name}</span>
+                    <span class="text-xs text-gray-500 bg-gray-200 rounded px-2 py-1 self-center">Seleccionar</span>
+                `;
+                card.onclick = () => handleStudentClick(student.name, groupName);
+                grid.appendChild(card);
+            });
+        }
+
+        // Lógica de selección de alumno y regla de 1 alumno fuera
+        function handleStudentClick(studentName, groupName) {
+            const teacherId = document.getElementById('teacherSelect').value;
+            if (!teacherId) {
+                alert("Por favor seleccione un docente primero.");
+                return;
+            }
+
+            if (currentActiveStudent) {
+                alert("⚠️ Ya hay un alumno fuera de clase. Debe registrar su regreso antes de que salga otro.");
+                return;
+            }
+
+            const motivo = document.getElementById('motivoSelect').value;
+            const now = new Date();
+            const fechaStr = now.toLocaleDateString();
+            const horaSalidaStr = now.toLocaleTimeString();
+
+            // Obtener nombre del docente
+            let teacherName = "Maestro Comodín";
+            if (teacherId !== "COMODIN") {
+                let t = scheduleData.teachers.find(teach => teach.id === teacherId);
+                if (t) teacherName = t.name;
+            }
+
+            // Registrar en Google Sheets vía Apps Script
+            const payload = {
+                action: "salida",
+                alumno: studentName,
+                grupo: groupName,
+                materia: document.getElementById('activeSubjectDisplay').textContent.replace("Materia: ", ""),
+                docente: teacherName,
+                motivo: motivo,
+                fecha: fechaStr,
+                horaSalida: horaSalidaStr
+            };
+
+            fetch(WEB_APP_URL, {
+                method: "POST",
+                mode: "no-cors", // Evita problemas de CORS con Apps Script
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            }).then(() => {
+                console.log("Salida enviada a Sheets");
+            }).catch(err => console.error(err));
+
+            // Actualizar Firebase para bloquear en tiempo real
+            db.ref('currentOut').set({
+                student: studentName,
+                group: groupName,
+                motivo: motivo,
+                horaSalida: horaSalidaStr,
+                timestamp: Date.now()
+            });
+        }
+
+        // Registrar Regreso
+        function registerReturn() {
+            if (!currentActiveStudent) return;
+
+            const now = new Date();
+            const horaRegresoStr = now.toLocaleTimeString();
+
+            // Enviar actualización a Google Sheets (opcionalmente guardando la última fila o enviando la hora de regreso)
+            const payload = {
+                action: "regreso",
+                alumno: currentActiveStudent.student,
+                horaRegreso: horaRegresoStr
+            };
+
+            fetch(WEB_APP_URL, {
+                method: "POST",
+                mode: "no-cors",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+
+            // Limpiar Firebase
+            db.ref('currentOut').remove();
+        }
+
+        // Escuchar cambios en tiempo real con Firebase
+        function setupFirebaseListener() {
+            const alertBox = document.getElementById('statusAlert');
+            const studentSpan = document.getElementById('currentStudentOut');
+            const motivoSpan = document.getElementById('currentMotivoOut');
+
+            db.ref('currentOut').on('snapshot', (snapshot) => {
+                // Compatible con firebase 9 compat
+            });
+
+            db.ref('currentOut').on('value', (snapshot) => {
+                const data = snapshot.val();
+                if (data) {
+                    currentActiveStudent = data;
+                    studentSpan.textContent = `${data.student} (${data.group})`;
+                    motivoSpan.textContent = data.motivo;
+                    alertBox.classList.remove('hidden');
+                } else {
+                    currentActiveStudent = null;
+                    alertBox.classList.add('hidden');
+                }
+            });
+        }
+    </script>
+</body>
+</html>
