@@ -88,20 +88,20 @@
 
     <script>
         // CONFIGURACIÓN DE FIREBASE (Reemplaza con tus credenciales de tu proyecto Firebase)
-        const firebaseConfig = {
-            apiKey: "TU_API_KEY",
-            authDomain: "TU_AUTH_DOMAIN",
-            databaseURL: "TU_DATABASE_URL",
-            projectId: "TU_PROJECT_ID",
-            storageBucket: "TU_STORAGE_BUCKET",
-            messagingSenderId: "TU_MESSAGING_SENDER_ID",
-            appId: "TU_APP_ID"
-        };
+       const firebaseConfig = {
+  apiKey: "AIzaSyDHD2nqk6GKnMUq0YFQoX3DMzrePhtZuOc",
+  authDomain: "quiero-wc.firebaseapp.com",
+  databaseURL: "https://quiero-wc-default-rtdb.firebaseio.com",
+  projectId: "quiero-wc",
+  storageBucket: "quiero-wc.firebasestorage.app",
+  messagingSenderId: "1009977439889",
+  appId: "1:1009977439889:web:c36fa0869f4a5abb333130"
+};
         firebase.initializeApp(firebaseConfig);
         const db = firebase.database();
 
         // URL DE TU WEB APP DE GOOGLE APPS SCRIPT
-        const WEB_APP_URL = "TU_URL_DE_GOOGLE_APPS_SCRIPT_AQUI";
+        const WEB_APP_URL = "https://script.google.com/macros/s/AKfycby5sOTFkGyZ1KhiAeu75bk0Pb3e9oyqdyeR5f3pRB_7NlNLrfg_0l7I7EdTxghE5riV/exec";
 
         let scheduleData = JSON.parse(localStorage.getItem('scheduleData')) || null;
         let studentsData = JSON.parse(localStorage.getItem('studentsData')) || [];
