@@ -274,6 +274,7 @@
         }
 
         // Interacción fluida por clics sin ventanas emergentes
+        // Interacción fluida por clics sin ventanas emergentes
         function handleStudentClick(studentName, groupName, cardElement) {
             const teacherId = document.getElementById('teacherSelect').value;
             if (!teacherId) {
@@ -295,22 +296,19 @@
                 updateCardStyle(cardElement, 1, studentName);
                 localStorage.setItem('studentStates', JSON.stringify(studentStates));
 
-                // Enviar Salida a Google Sheets
-                fetch(WEB_APP_URL, {
-                    method: "POST",
-                    mode: "no-cors",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        action: "salida",
-                        alumno: studentName,
-                        grupo: groupName,
-                        materia: document.getElementById('activeSubjectDisplay').textContent.replace("Materia: ", ""),
-                        docente: teacherName,
-                        motivo: motivo,
-                        fecha: fechaStr,
-                        horaSalida: horaStr
-                    })
-                });
+                // Construcción de parámetros compatibles con Apps Script sin CORS
+                const params = new URLSearchParams();
+                params.append("action", "salida");
+                params.append("alumno", studentName);
+                params.append("grupo", groupName);
+                params.append("materia", document.getElementById('activeSubjectDisplay').textContent.replace("Materia: ", ""));
+                params.append("docente", teacherName);
+                params.append("motivo", motivo);
+                params.append("fecha", fechaStr);
+                params.append("horaSalida", horaStr);
+
+                // Enviar usando la API de Beacon o Fetch estándar de formulario
+                navigator.sendBeacon(WEB_APP_URL, params);
 
                 // Firebase sync
                 db.ref('currentOut').set({
@@ -322,25 +320,19 @@
                 });
 
             } else if (currentState === 1) {
-                // PASO 2: REGRESO (Se pone ROJO momentáneamente y luego vuelve a Verde/Normal)
+                // PASO 2: REGRESO (Se pone ROJO momentáneamente)
                 studentStates[studentName] = 2;
                 updateCardStyle(cardElement, 2, studentName);
 
-                // Enviar Regreso a Google Sheets
-                fetch(WEB_APP_URL, {
-                    method: "POST",
-                    mode: "no-cors",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        action: "regreso",
-                        alumno: studentName,
-                        horaRegreso: horaStr
-                    })
-                });
+                const params = new URLSearchParams();
+                params.append("action", "regreso");
+                params.append("alumno", studentName);
+                params.append("horaRegreso", horaStr);
+
+                navigator.sendBeacon(WEB_APP_URL, params);
 
                 db.ref('currentOut').remove();
 
-                // Regresar a estado libre (verde/normal) tras un breve instante
                 setTimeout(() => {
                     studentStates[studentName] = 0;
                     localStorage.setItem('studentStates', JSON.stringify(studentStates));
@@ -348,7 +340,6 @@
                 }, 800);
             }
         }
-
         function registerReturn() {
             if (!currentActiveStudent) return;
             const now = new Date();
