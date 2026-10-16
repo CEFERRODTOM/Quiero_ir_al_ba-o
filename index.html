@@ -206,8 +206,7 @@
                 grid.appendChild(card);
             });
         }
-
-        function triggerExit(studentName, groupName) {
+function triggerExit(studentName, groupName) {
             const teacherId = document.getElementById('teacherSelect').value;
             if (!teacherId) {
                 alert("Por favor seleccione un docente primero.");
@@ -258,6 +257,10 @@
                 alert("Error de red al registrar la salida.");
             });
         }
+
+
+
+        
         function registerReturn() {
             if (!currentActiveStudent) return;
 
