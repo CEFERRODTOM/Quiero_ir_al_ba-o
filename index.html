@@ -245,6 +245,7 @@
         }
 
         // Renderizar la cuadrícula de alumnos del grupo seleccionado
+        // Renderizar la cuadrícula de alumnos del grupo seleccionado
         function renderStudents() {
             const groupName = document.getElementById('groupSelect').value;
             const grid = document.getElementById('studentsGrid');
@@ -259,23 +260,21 @@
             const filteredStudents = studentsData.filter(s => s.group === groupName);
             
             if (filteredStudents.length === 0) {
-                grid.innerHTML = `<p class="text-red-500 col-span-full text-center py-8">No se encontraron alumnos para el grupo ${groupName} en el CSV cargado.</p>`;
+                grid.innerHTML = `<p class="text-red-500 col-span-full text-center py-8">No se encontraron alumnos para el grupo ${groupName} en el CSV cargado. (Asegúrate de haber vuelto a cargar el archivo CSV en este dominio).</p>`;
                 return;
             }
 
             filteredStudents.forEach(student => {
-            const card = document.createElement('div');
-            card.className = "student-card bg-gray-50 border border-gray-200 rounded-lg p-4 text-center cursor-pointer hover:bg-blue-50 hover:border-blue-300 shadow-sm flex flex-col justify-between";
-            card.innerHTML = `
-                <span class="font-medium text-gray-800 text-sm mb-2">${student.name}</span>
-                <span class="text-xs text-gray-500 bg-gray-200 rounded px-2 py-1 self-center">Seleccionar</span>
-            `;
-            // Aseguramos el evento click explícito
-            card.addEventListener('click', function() {
-                handleStudentClick(student.name, groupName);
+                const card = document.createElement('div');
+                card.className = "student-card bg-gray-50 border border-gray-200 rounded-lg p-4 text-center cursor-pointer hover:bg-blue-50 hover:border-blue-300 shadow-sm flex flex-col justify-between";
+                // Usamos un evento directo onclick en el HTML generado
+                card.setAttribute('onclick', `handleStudentClick('${student.name.replace(/'/g, "\\'")}', '${groupName}')`);
+                card.innerHTML = `
+                    <span class="font-medium text-gray-800 text-sm mb-2 pointer-events-none">${student.name}</span>
+                    <span class="text-xs text-gray-500 bg-gray-200 rounded px-2 py-1 self-center pointer-events-none">Seleccionar</span>
+                `;
+                grid.appendChild(card);
             });
-            grid.appendChild(card);
-        });
         }
 
         // Lógica de selección de alumno y regla de 1 alumno fuera
