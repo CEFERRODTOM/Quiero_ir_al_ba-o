@@ -3,12 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Control de Baño y Enfermería - Escolar</title>
+    <title>Control de Baño y Enfermería</title>
     <!-- Tailwind CSS -->
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-    <!-- Firebase SDKs (Compat v9) -->
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
     <style>
         .student-card { transition: all 0.2s ease; }
         .student-card:hover { transform: translateY(-2px); }
@@ -58,7 +55,7 @@
             </div>
         </div>
 
-        <!-- Alerta de Alumno Fuera (Sincronizado con Firebase) -->
+        <!-- Alerta de Alumno Fuera -->
         <div id="statusAlert" class="hidden bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-6 rounded shadow-sm flex justify-between items-center">
             <div>
                 <span class="font-bold text-yellow-800">⚠️ Alumno actualmente fuera:</span>
@@ -82,64 +79,37 @@
         </div>
     </div>
 
-    <!-- Script Principal Reestructurado -->
     <script>
-        // --- CONFIGURACIÓN ---
-        const firebaseConfig = {
-            apiKey: "AIzaSyDHD2nqk6GKnMUq0YFQoX3DMzrePhtZuOc",
-            authDomain: "quiero-wc.firebaseapp.com",
-            databaseURL: "https://quiero-wc-default-rtdb.firebaseio.com",
-            projectId: "quiero-wc",
-            storageBucket: "quiero-wc.firebasestorage.app",
-            messagingSenderId: "1009977439889",
-            appId: "1:1009977439889:web:c36fa0869f4a5abb333130"
-        };
-        
-        // Inicializar Firebase
-        if (!firebase.apps.length) {
-            firebase.initializeApp(firebaseConfig);
-        }
-        const db = firebase.database();
-
+        // URL DE TU WEB APP DE GOOGLE APPS SCRIPT
         const WEB_APP_URL = "https://script.google.com/macros/s/AKfycby5sOTFkGyZ1KhiAeu75bk0Pb3e9oyqdyeR5f3pRB_7NlNLrfg_0l7I7EdTxghE5riV/exec";
 
-        // Estado Global de la App
         let scheduleData = JSON.parse(localStorage.getItem('scheduleData')) || null;
         let studentsData = JSON.parse(localStorage.getItem('studentsData')) || [];
         let currentActiveStudent = null;
 
-        // --- INICIO Y EVENT LISTENERS ---
         document.addEventListener('DOMContentLoaded', () => {
-            if (scheduleData) {
-                initSelectors();
-            }
-            setupFirebaseListener();
+            if (scheduleData) initSelectors();
+            checkCurrentStatus();
 
-            // Eventos de carga de archivos
             document.getElementById('jsonFileInput').addEventListener('change', handleJSONUpload);
             document.getElementById('csvFileInput').addEventListener('change', handleCSVUpload);
-
-            // Eventos de cambios en selectores
             document.getElementById('groupSelect').addEventListener('change', renderStudents);
             document.getElementById('teacherSelect').addEventListener('change', updateContext);
             document.getElementById('returnBtn').addEventListener('click', registerReturn);
+
+            // Actualizar estado cada 10 segundos consultando Google Sheets
+            setInterval(checkCurrentStatus, 10000);
         });
 
-        // --- CARGA DE ARCHIVOS ---
         function handleJSONUpload(event) {
             const file = event.target.files[0];
             if (!file) return;
             const reader = new FileReader();
             reader.onload = (e) => {
-                try {
-                    scheduleData = JSON.parse(e.target.result);
-                    localStorage.setItem('scheduleData', JSON.stringify(scheduleData));
-                    alert("¡Horarios JSON cargados con éxito!");
-                    initSelectors();
-                } catch (err) {
-                    alert("Error al leer el JSON de horarios.");
-                    console.error(err);
-                }
+                scheduleData = JSON.parse(e.target.result);
+                localStorage.setItem('scheduleData', JSON.stringify(scheduleData));
+                alert("¡Horarios cargados!");
+                initSelectors();
             };
             reader.readAsText(file);
         }
@@ -149,47 +119,36 @@
             if (!file) return;
             const reader = new FileReader();
             reader.onload = (e) => {
-                try {
-                    const text = e.target.result;
-                    const lines = text.split(/\r\n|\n/);
-                    studentsData = [];
-                    // Saltamos la cabecera (i = 1)
-                    for (let i = 1; i < lines.length; i++) {
-                        const line = lines[i].trim();
-                        if (!line) continue;
-                        const parts = line.split(',');
-                        if (parts.length >= 2) {
-                            studentsData.push({
-                                name: parts[0].trim().replace(/^["']|["']$/g, ''),
-                                group: parts[1].trim().replace(/^["']|["']$/g, '')
-                            });
-                        }
+                const lines = e.target.result.split(/\r\n|\n/);
+                studentsData = [];
+                for (let i = 1; i < lines.length; i++) {
+                    const line = lines[i].trim();
+                    if (!line) continue;
+                    const parts = line.split(',');
+                    if (parts.length >= 2) {
+                        studentsData.push({
+                            name: parts[0].trim().replace(/^["']|["']$/g, ''),
+                            group: parts[1].trim().replace(/^["']|["']$/g, '')
+                        });
                     }
-                    localStorage.setItem('studentsData', JSON.stringify(studentsData));
-                    alert(`¡Se cargaron ${studentsData.length} alumnos correctamente!`);
-                    renderStudents();
-                } catch (err) {
-                    alert("Error al procesar el archivo CSV.");
-                    console.error(err);
                 }
+                localStorage.setItem('studentsData', JSON.stringify(studentsData));
+                alert(`¡Se cargaron ${studentsData.length} alumnos!`);
+                renderStudents();
             };
             reader.readAsText(file);
         }
 
-        // --- INICIALIZAR SELECTORES ---
         function initSelectors() {
             if (!scheduleData) return;
-            
             const teacherSelect = document.getElementById('teacherSelect');
             teacherSelect.innerHTML = '<option value="">Seleccione docente...</option>';
             
-            // Maestro Comodín
             let comodinOpt = document.createElement('option');
             comodinOpt.value = "COMODIN";
             comodinOpt.textContent = "⭐ MAESTRO COMODÍN (Actualización / Libre)";
             teacherSelect.appendChild(comodinOpt);
 
-            // Docentes ordenados
             let teachers = [...scheduleData.teachers].sort((a, b) => a.name.localeCompare(b.name));
             teachers.forEach(t => {
                 let opt = document.createElement('option');
@@ -198,7 +157,6 @@
                 teacherSelect.appendChild(opt);
             });
 
-            // Grupos
             const groupSelect = document.getElementById('groupSelect');
             groupSelect.innerHTML = '<option value="">Seleccione grupo...</option>';
             scheduleData.classes.forEach(c => {
@@ -207,198 +165,124 @@
                 opt.textContent = c.name;
                 groupSelect.appendChild(opt);
             });
-
-            autodetectCurrentClass();
         }
 
         function updateContext() {
-            const teacherId = document.getElementById('teacherSelect').value;
-            if (teacherId === "COMODIN") {
-                document.getElementById('activeSubjectDisplay').textContent = "Materia: [Modo Comodín / Libre]";
+            if (document.getElementById('teacherSelect').value === "COMODIN") {
+                document.getElementById('activeSubjectDisplay').textContent = "Materia: [Modo Comodín]";
             }
         }
 
-        function autodetectionDayAndPeriod() {
-            const now = new Date();
-            const dayMap = { 1: "Lunes", 2: "Martes", 3: "Miercoles", 4: "Jueves", 5: "Viernes" };
-            const currentDayName = dayMap[now.getDay()];
-            const currentTimeVal = now.getHours() * 60 + now.getMinutes();
-
-            let matchedPeriod = null;
-            if (scheduleData && scheduleData.periods) {
-                scheduleData.periods.forEach(p => {
-                    let startVal = p.startHour * 60 + (p.startMinute || 0);
-                    let endVal = p.endHour * 60 + (p.endMinute || 50);
-                    if (currentTimeVal >= startVal && currentTimeVal <= endVal) {
-                        matchedPeriod = p;
-                    }
-                });
-            }
-            return { dayName: currentDayName, period: matchedPeriod };
-        }
-
-        function autodetectCurrentClass() {
-            const auto = autodetectionDayAndPeriod();
-            if (!auto.dayName || !auto.period || !scheduleData) return;
-
-            const dayObj = scheduleData.days.find(d => d.name === auto.dayName);
-            if (!dayObj) return;
-
-            for (let act of scheduleData.activities) {
-                let card = act.cards.find(c => c.dayId === dayObj.id && c.periodId === auto.period.id);
-                if (card) {
-                    document.getElementById('teacherSelect').value = act.teacherIds[0];
-                    updateContext();
-                    break;
-                }
-            }
-        }
-
-        // --- RENDERIZAR CUADRÍCULA DE ALUMNOS ---
         function renderStudents() {
             const groupName = document.getElementById('groupSelect').value;
             const grid = document.getElementById('studentsGrid');
             grid.innerHTML = '';
 
             if (!groupName) {
-                grid.innerHTML = '<p class="text-gray-500 col-span-full text-center py-8">Seleccione un grupo para ver los alumnos.</p>';
+                grid.innerHTML = '<p class="text-gray-500 col-span-full text-center py-8">Seleccione un grupo.</p>';
                 return;
             }
 
-            if (studentsData.length === 0) {
-                grid.innerHTML = '<p class="text-red-500 col-span-full text-center py-8">⚠️ No hay datos de alumnos cargados. Por favor cargue el archivo CSV.</p>';
+            const filtered = studentsData.filter(s => s.group === groupName);
+            if (filtered.length === 0) {
+                grid.innerHTML = '<p class="text-red-500 col-span-full text-center py-8">No hay alumnos en este grupo o falta cargar el CSV.</p>';
                 return;
             }
 
-            const filteredStudents = studentsData.filter(s => s.group === groupName);
-            
-            if (filteredStudents.length === 0) {
-                grid.innerHTML = `<p class="text-orange-500 col-span-full text-center py-8">No se encontraron alumnos para el grupo ${groupName} en el CSV.</p>`;
-                return;
-            }
-
-            filteredStudents.forEach(student => {
+            filtered.forEach(student => {
                 const card = document.createElement('div');
-                card.className = "student-card bg-gray-50 border border-gray-200 rounded-lg p-4 text-center cursor-pointer hover:bg-blue-50 hover:border-blue-300 shadow-sm flex flex-col justify-between";
+                card.className = "student-card bg-gray-50 border border-gray-200 rounded-lg p-4 text-center cursor-pointer hover:bg-blue-50 shadow-sm flex flex-col justify-between";
                 card.innerHTML = `
                     <span class="font-medium text-gray-800 text-sm mb-2 pointer-events-none">${student.name}</span>
                     <span class="text-xs text-gray-500 bg-gray-200 rounded px-2 py-1 self-center pointer-events-none">Seleccionar</span>
                 `;
-                
-                // Vincular evento de clic de manera robusta
-                card.addEventListener('click', () => {
-                    triggerStudentExit(student.name, groupName);
-                });
-
+                card.addEventListener('click', () => triggerExit(student.name, groupName));
                 grid.appendChild(card);
             });
         }
 
-        // --- ACCIONES DE SALIDA Y REGRESO ---
-        function triggerStudentExit(studentName, groupName) {
+        function triggerExit(studentName, groupName) {
             const teacherId = document.getElementById('teacherSelect').value;
             if (!teacherId) {
-                alert("Por favor seleccione un docente o el Maestro Comodín primero.");
+                alert("Seleccione un docente primero.");
                 return;
             }
 
             if (currentActiveStudent) {
-                alert("⚠️ Ya hay un alumno fuera de clase. Debe registrar su regreso antes de que salga otro.");
+                alert("⚠️ Ya hay un alumno fuera de clase.");
                 return;
             }
 
             const motivo = document.getElementById('motivoSelect').value;
             const now = new Date();
-            const fechaStr = now.toLocaleDateString();
-            const horaSalidaStr = now.toLocaleTimeString();
+            let teacherName = teacherId === "COMODIN" ? "Maestro Comodín" : scheduleData.teachers.find(t => t.id === teacherId)?.name || "Docente";
 
-            let teacherName = "Maestro Comodín";
-            if (teacherId !== "COMODIN") {
-                let t = scheduleData.teachers.find(teach => teach.id === teacherId);
-                if (t) teacherName = t.name;
-            }
-
-            const materiaText = document.getElementById('activeSubjectDisplay').textContent.replace("Materia: ", "");
-
-            // 1. Enviar a Google Sheets vía Apps Script
             const payload = {
                 action: "salida",
                 alumno: studentName,
                 grupo: groupName,
-                materia: materiaText,
+                materia: document.getElementById('activeSubjectDisplay').textContent.replace("Materia: ", ""),
                 docente: teacherName,
                 motivo: motivo,
-                fecha: fechaStr,
-                horaSalida: horaSalidaStr
+                fecha: now.toLocaleDateString(),
+                horaSalida: now.toLocaleTimeString()
             };
 
             fetch(WEB_APP_URL, {
                 method: "POST",
-                mode: "no-cors",
-                headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(payload)
-            }).catch(err => console.error("Error enviando a Sheets:", err));
-
-            // 2. Actualizar Firebase (bloquea la salida de otros)
-            db.ref('currentOut').set({
-                student: studentName,
-                group: groupName,
-                motivo: motivo,
-                horaSalida: horaSalidaStr,
-                timestamp: Date.now()
-            }).then(() => {
-                console.log("Salida registrada en Firebase");
-            }).catch(err => {
-                alert("Error al conectar con Firebase. Verifique sus reglas de base de datos.");
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === "blocked") {
+                    alert(data.message);
+                }
+                checkCurrentStatus();
+            })
+            .catch(err => {
                 console.error(err);
+                checkCurrentStatus();
             });
         }
 
         function registerReturn() {
-            if (!currentActiveStudent) return;
-
             const now = new Date();
-            const horaRegresoStr = now.toLocaleTimeString();
-
             const payload = {
                 action: "regreso",
-                alumno: currentActiveStudent.student,
-                horaRegreso: horaRegresoStr
+                horaRegreso: now.toLocaleTimeString()
             };
 
             fetch(WEB_APP_URL, {
                 method: "POST",
-                mode: "no-cors",
-                headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(payload)
-            }).catch(err => console.error("Error enviando regreso a Sheets:", err));
-
-            // Limpiar Firebase
-            db.ref('currentOut').remove().then(() => {
-                console.log("Regreso registrado con éxito");
+            })
+            .then(res => res.json())
+            .then(data => {
+                checkCurrentStatus();
             });
         }
 
-        // --- SINCRONIZACIÓN EN TIEMPO REAL CON FIREBASE ---
-        function setupFirebaseListener() {
-            const alertBox = document.getElementById('statusAlert');
-            const studentSpan = document.getElementById('currentStudentOut');
-            const motivoSpan = document.getElementById('currentMotivoOut');
-
-            db.ref('currentOut').on('value', (snapshot) => {
-                const data = snapshot.val();
-                if (data) {
-                    currentActiveStudent = data;
-                    studentSpan.textContent = `${data.student} (${data.group})`;
-                    motivoSpan.textContent = data.motivo;
+        function checkCurrentStatus() {
+            fetch(WEB_APP_URL + "?action=obtenerEstado", { method: "GET" }) // o POST dependiendo del despliegue
+            // Nota: Como Apps Script maneja doPost, hacemos un POST simulado para consultar
+            fetch(WEB_APP_URL, {
+                method: "POST",
+                body: JSON.stringify({ action: "obtenerEstado" })
+            })
+            .then(res => res.json())
+            .then(data => {
+                const alertBox = document.getElementById('statusAlert');
+                if (data.status === "success" && data.currentOut) {
+                    currentActiveStudent = data.currentOut;
+                    document.getElementById('currentStudentOut').textContent = `${data.currentOut.student} (${data.currentOut.group})`;
+                    document.getElementById('currentMotivoOut').textContent = data.currentOut.motivo;
                     alertBox.classList.remove('hidden');
                 } else {
                     currentActiveStudent = null;
                     alertBox.classList.add('hidden');
                 }
-            }, (error) => {
-                console.error("Error en Firebase listener:", error);
-            });
+            })
+            .catch(err => console.error("Error al consultar estado:", err));
         }
     </script>
 </body>
